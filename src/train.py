@@ -1,6 +1,6 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 from evaluate import evaluate_agent
 import numpy as np
 import torch
@@ -201,11 +201,11 @@ def train(nb_episodes):
             obs = next_state
 
         
-    plt.title("Strategy loss over time")
-    plt.xlabel("Episodes")
-    plt.ylabel("Strategy loss")
-    plt.plot(np.arange(nb_episodes),episode_return)
-    plt.show()
+    # plt.title("Strategy loss over time")
+    # plt.xlabel("Episodes")
+    # plt.ylabel("Strategy loss")
+    # plt.plot(np.arange(nb_episodes),episode_return)
+    # plt.show()
             
     return agent
 
