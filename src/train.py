@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import random
 
-config = {'learning_rate': 0.001,
+config = {'learning_rate': 0.0001,
           'gamma': 0.98,
           'buffer_size': 1000000,
           'epsilon_min': 0.01,
@@ -31,7 +31,7 @@ class ProjectAgent:
         self.size_observation_space = 6
         self.size_action_space = 4
         self.nb_neurons = 64
-        self.path = "myagent.pt"
+        self.path = "src/myagent.pt"
         self.DQN = torch.nn.Sequential(nn.Linear(self.size_observation_space, self.nb_neurons),
                           nn.ReLU(),
                           nn.Linear(self.nb_neurons, self.nb_neurons),
@@ -155,7 +155,7 @@ def train(nb_episodes):
     memory = ReplayBuffer(config['buffer_size'], device)
     cum_reward = 0
     step = 0
-    episode_return = []
+    episode_return = [0]
     episode = 0
     done = False
     
@@ -194,18 +194,19 @@ def train(nb_episodes):
                     ", episode return ", '{:4.1f}'.format(cum_reward/step),
                     sep='')
             obs, _ = env.reset()
-            episode_return.append(cum_reward)
+            episode_return.append((cum_reward+episode_return[-1]*(episode-1))/episode)
             step = 0
             cum_reward = 0
         else:
             obs = next_state
 
-        
+    # fig = plt.figure() 
     # plt.title("Strategy loss over time")
     # plt.xlabel("Episodes")
     # plt.ylabel("Strategy loss")
     # plt.plot(np.arange(nb_episodes),episode_return)
     # plt.show()
+    # fig.savefig("strategy_loss.png")
             
     return agent
 
@@ -214,7 +215,7 @@ if __name__ == "__main__":
 
     # Initialization of the agent. Replace DummyAgent with your custom agent implementation.
 
-    agent = train(nb_episodes=200)
+    agent = train(nb_episodes=1000)
     agent.save("myagent.pt")
     print('Agent saved')
     agent.load()
