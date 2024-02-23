@@ -18,9 +18,10 @@ config = {'learning_rate': 0.0001,
           'epsilon_delay_decay': 40,
           'batch_size': 40,
           'gradient_steps': 1,
-          'update_target_strategy': 'ema', # or 'ema'
+          'update_target_strategy': 'replace', # or 'ema'
           'update_target_freq': 50,
           'update_target_tau': 0.005,
+          'horizon': 200,
           'criterion': torch.nn.SmoothL1Loss()}
 
 env = TimeLimit(
@@ -38,8 +39,8 @@ class ProjectAgent:
         self.size_observation_space = 6
         self.size_action_space = 4
         self.nb_neurons = 64
-        # self.path = "src/myagent.pt"
-        self.path = "myagent.pt"
+        self.path = "src/myagent.pt"
+        # self.path = "myagent.pt"
         self.DQN = torch.nn.Sequential(nn.Linear(self.size_observation_space, self.nb_neurons),
                           nn.ReLU(),
                           nn.Linear(self.nb_neurons, self.nb_neurons),
@@ -104,35 +105,52 @@ class RandomForestAgent:
     def __init__(self, num_features = 6, num_actions = 4):
         self.num_features = num_features
         self.num_actions = num_actions
-        self.rf = RandomForestClassifier(n_estimators=10)
+        self.rf = None
         self.state_history = []
         self.action_history = []
         self.reward_history = []
+        self.next_state_history = []
 
     def select_action(self, state):
-        state = np.array(state).reshape(1, -1)
-        q_values = self.rf.predict_proba(state)[0]
-        return np.random.choice(self.num_actions, p=q_values)
-
-    def update(self, state, action, reward):
-        self.state_history.append(state)
-        self.action_history.append(action)
-        self.reward_history.append(reward)
-
-        if len(self.state_history) >= 10:  # Update model when enough data is collected
-            self.rf.fit(np.array(self.state_history), np.array(self.action_history))
+        Qsa = []
+        for action in range(self.num_actions):
+            sa = np.append(state, action).reshape(1, -1)
+            Qsa.append(self.rf.predict(sa))
+        return np.argmax(Qsa)
 
     def train(self, env, num_episodes=200, steps_per_episode=200):
-        for episode in range(num_episodes):
-            state = self.reset_state(env)  # Reset the environment at the beginning of each episode
-            total_reward = 0
-            for step in range(steps_per_episode):
-                action = self.select_action(state)
-                next_state, reward = self.transition(action, env)
-                total_reward += reward
-                self.update(next_state, action, reward)
-     
-            print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+        state = self.reset_state(env)  # Reset the environment at the beginning of each episode
+        
+        for _ in range(config['horizon']): # collect samples
+            action = self.act(state, use_random=True)
+            next_state, reward, done, trunc = self.transition(action, env)
+            self.state_history.append(state)
+            self.action_history.append(action)
+            self.reward_history.append(reward)
+            self.next_state_history.append(next_state)
+            if done or trunc:
+                state = self.reset_state(env)
+            else:
+                state = next_state
+        
+        Q_func = []
+        SA = np.append(np.array(self.state_history), np.array(self.action_history),axis=1)
+        for iter in range(num_episodes):
+            print("Iteration ", '{:3d}'.format(iter), sep='')
+            if iter == 0:
+                value = np.array(self.reward_history).copy()
+            else:
+                Q2 = np.zeros((len(self.state_history), self.num_actions))
+                for next_action in range(self.num_actions):
+                    A2 = next_action*np.ones((len(self.next_state_history), 1))
+                    SA_next = np.append(np.array(self.next_state_history), A2,axis=1)
+                    Q2[:, next_action] = Q_func[-1].predict_proba(SA_next)
+                max_Q2 = np.max(Q2, axis=1)
+                value = np.array(self.reward_history).copy() + config['gamma']*max_Q2
+            Q = RandomForestClassifier()
+            Q.fit(SA, value)
+            Q_func.append(Q)
+        self.rf = Q_func[-1]
 
     def reset_state(self,env):
         observation, _ = env.reset()
@@ -140,10 +158,14 @@ class RandomForestAgent:
 
     def transition(self, action, env):
         next_state, reward, done, trunc, _ = env.step(action)
-        return next_state, reward
+        return next_state, reward, done, trunc
     
-    def act(self, state):
-        return self.rf.predict(state)
+        
+    def act(self, state, use_random=False):
+        if use_random:
+            return np.random.choice([0,1,2,3])
+        else: 
+            return self.select_action(state)
 
 class RandomAgent:
 
@@ -295,28 +317,26 @@ if __name__ == "__main__":
     env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)
     agent = ProjectAgent()
     # agent = train(agent,nb_episodes=500, env=env)
-    # agent.save("myagent.pt")
-    print('Agent saved')
+    # agent.save("src/myagent.pt")
+    # print('Agent saved')
     agent.load()
-    # randforest_ag = RandomForestAgent()
-    # randforest_ag.train(env = env, num_episodes=200, steps_per_episode=200)
-    rand_ag = RandomAgent()
-
-    
+    randforest_ag = RandomForestAgent()
+    randforest_ag.train(env = env, num_episodes=200, steps_per_episode=200)
+    rand_ag = RandomAgent()    
     env_pop = TimeLimit(HIVPatient(domain_randomization=True), max_episode_steps=200)
     env_part = TimeLimit(HIVPatient(domain_randomization=False), max_episode_steps=200)
     result_myagent_part = evaluate_agent(agent, env_part, nb_episode = 10) 
     result_random_part = evaluate_agent(rand_ag, env_part, nb_episode = 10)
-    # result_randomforest_part = evaluate_agent(randforest_ag, env_part, nb_episode = 10)
+    result_randomforest_part = evaluate_agent(randforest_ag, env_part, nb_episode = 10)
     result_myagent_pop = evaluate_agent(agent, env_pop, nb_episode = 10)
     result_random_pop = evaluate_agent(rand_ag, env_pop, nb_episode = 10)
-    # result_randomforest_pop = evaluate_agent(randforest_ag, env_pop, nb_episode = 10)   
+    result_randomforest_pop = evaluate_agent(randforest_ag, env_pop, nb_episode = 10)   
     print("My agent partiel", result_myagent_part)
     print("Random agent partiel", result_random_part)
-    # print("Random forest agent partiel", result_randomforest_part)
+    print("Random forest agent partiel", result_randomforest_part)
     print("My agent population", result_myagent_pop)
     print("Random agent population", result_random_pop)
-    # print("Random forest agent population", result_randomforest_pop)
+    print("Random forest agent population", result_randomforest_pop)
 
     
     
