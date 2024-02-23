@@ -1,10 +1,12 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
-# from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt
 from evaluate import evaluate_agent
+from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.ensemble import RandomForestClassifier
 import random
 
 config = {'learning_rate': 0.0001,
@@ -14,7 +16,12 @@ config = {'learning_rate': 0.0001,
           'epsilon_max': 1.,
           'epsilon_decay_period': 10000,
           'epsilon_delay_decay': 40,
-          'batch_size': 40}
+          'batch_size': 40,
+          'gradient_steps': 1,
+          'update_target_strategy': 'ema', # or 'ema'
+          'update_target_freq': 50,
+          'update_target_tau': 0.005,
+          'criterion': torch.nn.SmoothL1Loss()}
 
 env = TimeLimit(
     env=HIVPatient(domain_randomization=False), max_episode_steps=200
@@ -31,7 +38,8 @@ class ProjectAgent:
         self.size_observation_space = 6
         self.size_action_space = 4
         self.nb_neurons = 64
-        self.path = "src/myagent.pt"
+        # self.path = "src/myagent.pt"
+        self.path = "myagent.pt"
         self.DQN = torch.nn.Sequential(nn.Linear(self.size_observation_space, self.nb_neurons),
                           nn.ReLU(),
                           nn.Linear(self.nb_neurons, self.nb_neurons),
@@ -87,8 +95,72 @@ class ProjectAgent:
         self.DQN.load_state_dict(state_dict)
         self.DQN.eval()
         pass
+
+        """Random Agent to compare with the trained agent.
+        """
     
 
+class RandomForestAgent:
+    def __init__(self, num_features = 6, num_actions = 4):
+        self.num_features = num_features
+        self.num_actions = num_actions
+        self.rf = RandomForestClassifier(n_estimators=10)
+        self.state_history = []
+        self.action_history = []
+        self.reward_history = []
+
+    def select_action(self, state):
+        state = np.array(state).reshape(1, -1)
+        q_values = self.rf.predict_proba(state)[0]
+        return np.random.choice(self.num_actions, p=q_values)
+
+    def update(self, state, action, reward):
+        self.state_history.append(state)
+        self.action_history.append(action)
+        self.reward_history.append(reward)
+
+        if len(self.state_history) >= 10:  # Update model when enough data is collected
+            self.rf.fit(np.array(self.state_history), np.array(self.action_history))
+
+    def train(self, env, num_episodes=200, steps_per_episode=200):
+        for episode in range(num_episodes):
+            state = self.reset_state(env)  # Reset the environment at the beginning of each episode
+            total_reward = 0
+            for step in range(steps_per_episode):
+                action = self.select_action(state)
+                next_state, reward = self.transition(action, env)
+                total_reward += reward
+                self.update(next_state, action, reward)
+     
+            print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+
+    def reset_state(self,env):
+        observation, _ = env.reset()
+        return observation # Initialize state randomly
+
+    def transition(self, action, env):
+        next_state, reward, done, trunc, _ = env.step(action)
+        return next_state, reward
+    
+    def act(self, state):
+        return self.rf.predict(state)
+
+class RandomAgent:
+
+    def act(self, observation, use_random=False):
+        return np.random.choice([0, 1, 2, 3])
+
+    def save(self, path):
+        pass
+
+    def load(self):
+
+        pass
+    
+
+        """Trained agent utils
+        """
+        
 class ReplayBuffer:
     def __init__(self, capacity, device):
         self.capacity = capacity # capacity of the buffer
@@ -106,33 +178,20 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.data)
     
-
-    
-def gradient_step(agent_model, memory, optimizer, criterion):
+def gradient_step(agent_model, target_model, memory, optimizer, criterion):
     if len(memory) > config['batch_size']:
         X, A, R, Y, D = memory.sample(config['batch_size'])
-        QYmax = agent_model(Y).max(1)[0].detach()
+        QYmax = target_model(Y).max(1)[0].detach()
         update = torch.addcmul(R, 1-D, QYmax, value=config['gamma']) # do if non-terminal(s'): update = r + gamma * max(Q')   else:  update = r
         QXA = agent_model(X).gather(1, A.to(torch.long).unsqueeze(1))
         loss = criterion(QXA, update.unsqueeze(1))
         optimizer.zero_grad()
         loss.backward()
         optimizer.step() 
-        
-class RandomAgent:
-
-    def act(self, observation, use_random=False):
-        return np.random.choice([0, 1, 2, 3])
-
-    def save(self, path):
-        pass
-
-    def load(self):
-
-        pass
-    
-    
-def train(nb_episodes):
+            
+        """Training pipeline for the agent
+        """
+def train(agent, nb_episodes, env):
     """
     Train the agent in the HIV environment.
 
@@ -142,15 +201,13 @@ def train(nb_episodes):
     Returns:
         Agent: The trained agent.
     """
-
-    agent = ProjectAgent()
     
     if torch.cuda.is_available():
         agent.DQN.to("cuda")
     device = "cuda" if next(agent.DQN.parameters()).is_cuda else "cpu"
-    
+    target_model = deepcopy(agent.DQN).to(device)
     optimizer = torch.optim.Adam(agent.DQN.parameters(), lr=config['learning_rate'])
-    criterion = torch.nn.MSELoss()
+    criterion = config['criterion']
     
     memory = ReplayBuffer(config['buffer_size'], device)
     cum_reward = 0
@@ -161,7 +218,7 @@ def train(nb_episodes):
     
     obs, info = env.reset()
     epsilon =  config['epsilon_max']
-    
+    count = 0
     while episode < nb_episodes:
         
          # update epsilon
@@ -180,12 +237,23 @@ def train(nb_episodes):
         cum_reward += reward
 
         # train
-        gradient_step(agent.DQN, memory, optimizer, criterion)
+        for _ in range(config['gradient_steps']):
+            gradient_step(agent.DQN,target_model, memory, optimizer, criterion)
         
         # next transition
         step += 1
-        # print('Step', step, 'Reward', reward, 'Cumulative reward', cum_reward, 'Epsilon',
-        # epsilon, 'Action', action, 'Next state', next_state, 'Done', done, 'Truncated', trunc)
+        # update target network if needed
+        if config['update_target_strategy'] == 'replace':
+            if step % config['update_target_freq'] == 0: 
+                target_model.load_state_dict(agent.DQN.state_dict())
+        if config['update_target_strategy'] == 'ema':
+            target_state_dict = target_model.state_dict()
+            model_state_dict = agent.DQN.state_dict()
+            tau = config['update_target_tau']
+            for key in model_state_dict:
+                target_state_dict[key] = tau*model_state_dict[key] + (1-tau)*target_state_dict[key]
+            target_model.load_state_dict(target_state_dict)
+            
         if trunc:
             episode += 1
             print("Episode ", '{:3d}'.format(episode), 
@@ -194,43 +262,61 @@ def train(nb_episodes):
                     ", episode return ", '{:4.1f}'.format(cum_reward/step),
                     sep='')
             obs, _ = env.reset()
+            
+            if cum_reward/step > 100000:
+                count += 1
+            else:
+                count = 0
+            if count == 3:
+                break
+                
             episode_return.append((cum_reward+episode_return[-1]*(episode-1))/episode)
             step = 0
             cum_reward = 0
         else:
             obs = next_state
 
-    # fig = plt.figure() 
-    # plt.title("Strategy loss over time")
-    # plt.xlabel("Episodes")
-    # plt.ylabel("Strategy loss")
-    # plt.plot(np.arange(nb_episodes),episode_return)
-    # plt.show()
-    # fig.savefig("strategy_loss.png")
+    fig = plt.figure() 
+    plt.title("Strategy loss over time")
+    plt.xlabel("Episodes")
+    plt.ylabel("Strategy loss")
+    plt.plot(episode_return)
+    plt.show()
+    fig.savefig("strategy_loss.png")
             
     return agent
 
+"""Launch training
+"""
 
 if __name__ == "__main__":
 
     # Initialization of the agent. Replace DummyAgent with your custom agent implementation.
-
-    agent = train(nb_episodes=1000)
-    agent.save("myagent.pt")
+    env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)
+    agent = ProjectAgent()
+    # agent = train(agent,nb_episodes=500, env=env)
+    # agent.save("myagent.pt")
     print('Agent saved')
     agent.load()
+    # randforest_ag = RandomForestAgent()
+    # randforest_ag.train(env = env, num_episodes=200, steps_per_episode=200)
     rand_ag = RandomAgent()
+
     
-    env_pop =TimeLimit(HIVPatient(domain_randomization=True), max_episode_steps=200)
+    env_pop = TimeLimit(HIVPatient(domain_randomization=True), max_episode_steps=200)
     env_part = TimeLimit(HIVPatient(domain_randomization=False), max_episode_steps=200)
     result_myagent_part = evaluate_agent(agent, env_part, nb_episode = 10) 
     result_random_part = evaluate_agent(rand_ag, env_part, nb_episode = 10)
+    # result_randomforest_part = evaluate_agent(randforest_ag, env_part, nb_episode = 10)
     result_myagent_pop = evaluate_agent(agent, env_pop, nb_episode = 10)
-    result_random_pop = evaluate_agent(rand_ag, env_pop, nb_episode = 10)   
+    result_random_pop = evaluate_agent(rand_ag, env_pop, nb_episode = 10)
+    # result_randomforest_pop = evaluate_agent(randforest_ag, env_pop, nb_episode = 10)   
     print("My agent partiel", result_myagent_part)
     print("Random agent partiel", result_random_part)
+    # print("Random forest agent partiel", result_randomforest_part)
     print("My agent population", result_myagent_pop)
     print("Random agent population", result_random_pop)
+    # print("Random forest agent population", result_randomforest_pop)
 
     
     
