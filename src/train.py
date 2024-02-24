@@ -308,6 +308,172 @@ def train(agent, nb_episodes, env):
             
     return agent
 
+class DQNAgent:
+    def __init__(self, device = "cpu"):
+        self.action_idx = [0, 1, 2, 3]
+        self.size_observation_space = 6
+        self.size_action_space = 4
+        self.nb_neurons = 64
+        self.path = "src/DQN_ag.pt"
+        # self.path = "myagent.pt"
+        self.DQN = torch.nn.Sequential(nn.Linear(self.size_observation_space, self.nb_neurons),
+                          nn.ReLU(),
+                          nn.Linear(self.nb_neurons, self.nb_neurons),
+                          nn.ReLU(), 
+                          nn.Linear(self.nb_neurons, self.size_action_space)).to(device)
+        
+    def act(self, observation, use_random=False):
+        if use_random:
+            return np.random.choice(self.action_idx)
+        else:
+            return self.greedy_action(observation)
+        
+    def greedy_action(self, state):
+        device = "cuda" if next(self.DQN.parameters()).is_cuda else "cpu"
+        with torch.no_grad():
+            Q = self.DQN(torch.Tensor(state).unsqueeze(0).to(device))
+            return torch.argmax(Q).item()
+
+    def save(self, path):
+        """
+        Saves the agent's current state to a file specified by the path.
+
+        This method should serialize the agent's state (e.g., model weights, configuration settings)
+        and save it to a file, allowing the agent to be later restored to this state using the `load` method.
+
+        Args:
+            path (str): The file path where the agent's state should be saved.
+
+        """
+        torch.save(self.DQN.state_dict(), path)
+        pass
+
+    def load(self):
+        state_dict = torch.load(self.path, map_location='cpu')
+        self.DQN.load_state_dict(state_dict)
+        self.DQN.eval()
+        pass
+
+"""Regressor Agent
+"""
+    
+
+class ProjectAgent:
+    def __init__(self, num_features = 6, num_actions = 4, regressor='XGBBoost'):
+        self.num_features = num_features
+        self.num_actions = num_actions
+        self.regr_model = None
+        self.state_history = []
+        self.action_history = []
+        self.reward_history = []
+        self.next_state_history = []
+        self.regressor = regressor
+
+    def select_action(self, state):
+        Qsa = []
+        for action in range(self.num_actions):
+            sa = np.append(state, action).reshape(1, -1)
+            Qsa.append(self.regr_model.predict(sa))
+        return np.argmax(Qsa)
+
+    def train(self, env, horizon = 200, num_episodes=200):
+        state = self.reset_state(env)  # Reset the environment at the beginning of each episode
+        
+        for _ in range(horizon): # collect samples
+            action = self.act(state, use_random=True)
+            next_state, reward, done, trunc = self.transition(action, env)
+            self.state_history.append(state)
+            self.action_history.append(action)
+            self.reward_history.append(reward)
+            self.next_state_history.append(next_state)
+            if done or trunc:
+                state = self.reset_state(env)
+            else:
+                state = next_state
+        
+        Q_func = []
+        SA = np.append(np.array(self.state_history), np.array(self.action_history).reshape((-1,1)),axis=1)
+        for iter in range(num_episodes):
+            if iter % 50 == 0:
+                print("Iteration ", '{:3d}'.format(iter), sep='')
+            if iter == 0:
+                value = np.array(self.reward_history).copy()
+            else:
+                Q2 = np.zeros((len(self.state_history), self.num_actions))
+                for next_action in range(self.num_actions):
+                    A2 = next_action*np.ones((len(self.next_state_history), 1))
+                    SA_next = np.append(np.array(self.next_state_history), A2,axis=1)
+                    Q2[:, next_action] = Q_func[-1].predict(SA_next)
+                max_Q2 = np.max(Q2, axis=1)
+                value = np.array(self.reward_history).copy() + config['gamma']*max_Q2
+            if self.regressor == 'RandomForest':
+                Q = RandomForestRegressor()
+            # elif self.regressor == 'LightGBM':
+            #     Q = lgb.LGBMRegressor()
+            elif self.regressor == 'XGBoost':
+                Q = xgb.XGBRegressor()
+            Q.fit(SA, value)
+            Q_func.append(Q)
+        self.regr_model = Q_func[-1]
+
+    def reset_state(self,env):
+        observation, _ = env.reset()
+        return observation # Initialize state randomly
+
+    def transition(self, action, env):
+        next_state, reward, done, trunc, _ = env.step(action)
+        return next_state, reward, done, trunc
+    
+        
+    def act(self, state, use_random=False):
+        if use_random:
+            return np.random.choice([0,1,2,3])
+        else: 
+            return self.select_action(state)
+        
+    def save(self):
+        if self.regressor == 'RandomForest':
+            with open('src/random_forest_model.pkl', 'wb') as f:
+                cPickle.dump(self.regr_model, f)
+                
+        # elif self.regressor == 'LightGBM':
+        #     self.regr_model.booster_.save_model('lgbm_model.txt')
+            
+        elif self.regressor == 'XGBoost':
+            self.regr_model.save_model('src/xgb_model.json')
+        pass
+
+    def load(self, path = ''):
+        if self.regressor == 'RandomForest':
+            with open('src/random_forest_model.pkl', 'rb') as f:
+                self.regr_model = cPickle.load(f)
+                
+        # elif self.regressor == 'LightGBM':
+        #     self.regr_model = lgb.Booster(model_file='src/lgbm_model.txt')
+            
+        elif self.regressor == 'XGBoost':
+            self.regr_model = xgb.XGBRegressor()
+            self.regr_model.load_model('src/xgb_model.json')    
+        pass
+
+"""Random Agent to compare with the trained agent.
+"""
+
+class ProjectAgent:
+
+    def act(self, observation, use_random=False):
+        return np.random.choice([0, 1, 2, 3])
+
+    def save(self, path):
+        pass
+
+    def load(self):
+
+        pass
+    
+
+
+
 """Launch training
 """
 
