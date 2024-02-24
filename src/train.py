@@ -6,7 +6,10 @@ from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestRegressor
+# import lightgbm as lgb
+import xgboost as xgb
+import _pickle as cPickle
 import random
 
 config = {'learning_rate': 0.0001,
@@ -18,9 +21,9 @@ config = {'learning_rate': 0.0001,
           'epsilon_delay_decay': 40,
           'batch_size': 40,
           'gradient_steps': 1,
-          'update_target_strategy': 'replace', # or 'ema'
+          'update_target_strategy': 'ema', # or 'ema'
           'update_target_freq': 50,
-          'update_target_tau': 0.005,
+          'update_target_tau': 0.05,
           'horizon': 200,
           'criterion': torch.nn.SmoothL1Loss()}
 
@@ -33,155 +36,10 @@ env = TimeLimit(
 # You have to implement your own agent.
 # Don't modify the methods names and signatures, but you can add methods.
 # ENJOY!
-class ProjectAgent:
-    def __init__(self, device = "cpu"):
-        self.action_idx = [0, 1, 2, 3]
-        self.size_observation_space = 6
-        self.size_action_space = 4
-        self.nb_neurons = 64
-        self.path = "src/myagent.pt"
-        # self.path = "myagent.pt"
-        self.DQN = torch.nn.Sequential(nn.Linear(self.size_observation_space, self.nb_neurons),
-                          nn.ReLU(),
-                          nn.Linear(self.nb_neurons, self.nb_neurons),
-                          nn.ReLU(), 
-                          nn.Linear(self.nb_neurons, self.size_action_space)).to(device)
-        
-    def act(self, observation, use_random=False):
-        # must return action in self.action_idx (0 pas de medoc, 1 medoc 1, 2 medoc 2, 3 les deux)
-        # use random define if agent should act randomly (for exploration)
-        # Il faut state 5 E elevé et state 4 V faible 
-        if use_random:
-            return np.random.choice(self.action_idx)
-        else:
-            return self.greedy_action(observation)
-        
-    def greedy_action(self, state):
-        device = "cuda" if next(self.DQN.parameters()).is_cuda else "cpu"
-        with torch.no_grad():
-            Q = self.DQN(torch.Tensor(state).unsqueeze(0).to(device))
-            return torch.argmax(Q).item()
 
-    def save(self, path):
-        """
-        Saves the agent's current state to a file specified by the path.
 
-        This method should serialize the agent's state (e.g., model weights, configuration settings)
-        and save it to a file, allowing the agent to be later restored to this state using the `load` method.
-
-        Args:
-            path (str): The file path where the agent's state should be saved.
-
-        """
-        torch.save(self.DQN.state_dict(), path)
-        pass
-
-    def load(self):
-        """
-        Loads the agent's state from a file specified by the path (HARDCODED). This not a good practice,
-        but it will simplify the grading process.
-
-        This method should deserialize the saved state (e.g., model weights, configuration settings)
-        from the file and restore the agent to this state. Implementations must ensure that the
-        agent's state is compatible with the `act` method's expectations.
-
-        Note:
-            It's important to ensure that neural network models (if used) are loaded in a way that is
-            compatible with the execution device (e.g., CPU, GPU). This may require specific handling
-            depending on the libraries used for model implementation. WARNING: THE GITHUB CLASSROOM
-        HANDLES ONLY CPU EXECUTION. IF YOU USE A NEURAL NETWORK MODEL, MAKE SURE TO LOAD IT IN A WAY THAT
-        DOES NOT REQUIRE A GPU.
-        """
-        state_dict = torch.load(self.path, map_location='cpu')
-        self.DQN.load_state_dict(state_dict)
-        self.DQN.eval()
-        pass
-
-        """Random Agent to compare with the trained agent.
-        """
-    
-
-class RandomForestAgent:
-    def __init__(self, num_features = 6, num_actions = 4):
-        self.num_features = num_features
-        self.num_actions = num_actions
-        self.rf = None
-        self.state_history = []
-        self.action_history = []
-        self.reward_history = []
-        self.next_state_history = []
-
-    def select_action(self, state):
-        Qsa = []
-        for action in range(self.num_actions):
-            sa = np.append(state, action).reshape(1, -1)
-            Qsa.append(self.rf.predict(sa))
-        return np.argmax(Qsa)
-
-    def train(self, env, num_episodes=200, steps_per_episode=200):
-        state = self.reset_state(env)  # Reset the environment at the beginning of each episode
-        
-        for _ in range(config['horizon']): # collect samples
-            action = self.act(state, use_random=True)
-            next_state, reward, done, trunc = self.transition(action, env)
-            self.state_history.append(state)
-            self.action_history.append(action)
-            self.reward_history.append(reward)
-            self.next_state_history.append(next_state)
-            if done or trunc:
-                state = self.reset_state(env)
-            else:
-                state = next_state
-        
-        Q_func = []
-        SA = np.append(np.array(self.state_history), np.array(self.action_history),axis=1)
-        for iter in range(num_episodes):
-            print("Iteration ", '{:3d}'.format(iter), sep='')
-            if iter == 0:
-                value = np.array(self.reward_history).copy()
-            else:
-                Q2 = np.zeros((len(self.state_history), self.num_actions))
-                for next_action in range(self.num_actions):
-                    A2 = next_action*np.ones((len(self.next_state_history), 1))
-                    SA_next = np.append(np.array(self.next_state_history), A2,axis=1)
-                    Q2[:, next_action] = Q_func[-1].predict_proba(SA_next)
-                max_Q2 = np.max(Q2, axis=1)
-                value = np.array(self.reward_history).copy() + config['gamma']*max_Q2
-            Q = RandomForestClassifier()
-            Q.fit(SA, value)
-            Q_func.append(Q)
-        self.rf = Q_func[-1]
-
-    def reset_state(self,env):
-        observation, _ = env.reset()
-        return observation # Initialize state randomly
-
-    def transition(self, action, env):
-        next_state, reward, done, trunc, _ = env.step(action)
-        return next_state, reward, done, trunc
-    
-        
-    def act(self, state, use_random=False):
-        if use_random:
-            return np.random.choice([0,1,2,3])
-        else: 
-            return self.select_action(state)
-
-class RandomAgent:
-
-    def act(self, observation, use_random=False):
-        return np.random.choice([0, 1, 2, 3])
-
-    def save(self, path):
-        pass
-
-    def load(self):
-
-        pass
-    
-
-        """Trained agent utils
-        """
+"""Trained agent utils
+"""
         
 class ReplayBuffer:
     def __init__(self, capacity, device):
@@ -459,7 +317,7 @@ class ProjectAgent:
 """Random Agent to compare with the trained agent.
 """
 
-class ProjectAgent:
+class RandomAgent:
 
     def act(self, observation, use_random=False):
         return np.random.choice([0, 1, 2, 3])
@@ -481,28 +339,60 @@ if __name__ == "__main__":
 
     # Initialization of the agent. Replace DummyAgent with your custom agent implementation.
     env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)
-    agent = ProjectAgent()
-    # agent = train(agent,nb_episodes=500, env=env)
-    # agent.save("src/myagent.pt")
+    DQN_ag = DQNAgent()
+    # agent = train( DQN_ag,nb_episodes=1000, env=env)
+    # agent.save("src/DQN_ag.pt")
     # print('Agent saved')
-    agent.load()
-    randforest_ag = RandomForestAgent()
-    randforest_ag.train(env = env, num_episodes=200, steps_per_episode=200)
+    DQN_ag.load()
+    
+    randforest_ag = ProjectAgent(regressor='RandomForest')
+    randforest_ag.train(env = env, horizon = int(5*1e4), num_episodes=20)
+    randforest_ag.save()
+    # randforest_ag = RegressorAgent(regressor='RandomForest')
+    # randforest_ag.load()
+    
+    xgb_ag = ProjectAgent(regressor='XGBoost')
+    xgb_ag.train(env = env, horizon = int(5*1e4), num_episodes=20)
+    xgb_ag.save()
+    # xgb_ag = RegressorAgent(regressor='XGBoost')
+    # xgb_ag.load()
+    
+    # lgbm_ag = RegressorAgent(regressor='LightGBM')
+    # lgbm_ag.train(env = env, horizon = 100, num_episodes=200)
+    # lgbm_ag.save()
+    # lgbm_ag = RegressorAgent(regressor='LightGBM')
+    # lgbm_ag.load()
+    
     rand_ag = RandomAgent()    
+    
     env_pop = TimeLimit(HIVPatient(domain_randomization=True), max_episode_steps=200)
     env_part = TimeLimit(HIVPatient(domain_randomization=False), max_episode_steps=200)
-    result_myagent_part = evaluate_agent(agent, env_part, nb_episode = 10) 
+    
+    print("Evaluation on particular")
+    result_DQN_part = evaluate_agent(DQN_ag, env_part, nb_episode = 10) 
     result_random_part = evaluate_agent(rand_ag, env_part, nb_episode = 10)
     result_randomforest_part = evaluate_agent(randforest_ag, env_part, nb_episode = 10)
-    result_myagent_pop = evaluate_agent(agent, env_pop, nb_episode = 10)
+    result_xgb_part = evaluate_agent(xgb_ag, env_part, nb_episode = 10)
+    # result_lgbm_part = evaluate_agent(lgbm_ag, env_part, nb_episode = 10)
+    
+    print("Evaluation on population")
+    result_DQN_pop = evaluate_agent(DQN_ag, env_pop, nb_episode = 10)
     result_random_pop = evaluate_agent(rand_ag, env_pop, nb_episode = 10)
-    result_randomforest_pop = evaluate_agent(randforest_ag, env_pop, nb_episode = 10)   
-    print("My agent partiel", result_myagent_part)
+    result_randomforest_pop = evaluate_agent(randforest_ag, env_pop, nb_episode = 10)  
+    result_xgb_pop = evaluate_agent(xgb_ag, env_pop, nb_episode = 10)
+    # result_lgbm_pop = evaluate_agent(lgbm_ag, env_pop, nb_episode = 10)
+     
+    print("DQN partiel", result_DQN_part)
     print("Random agent partiel", result_random_part)
-    print("Random forest agent partiel", result_randomforest_part)
-    print("My agent population", result_myagent_pop)
+    print("Random forest agent partiel", result_randomforest_part)    
+    print("XGBoost agent partiel", result_xgb_part)
+    # print("LightGBM agent partiel", result_lgbm_part)
+    
+    print("DQN population", result_DQN_pop)
     print("Random agent population", result_random_pop)
     print("Random forest agent population", result_randomforest_pop)
+    print("XGBoost agent population", result_xgb_pop)
+    # print("LightGBM agent population", result_lgbm_pop)
 
     
     
