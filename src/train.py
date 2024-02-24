@@ -217,7 +217,7 @@ class DQNAgent:
     
 
 class ProjectAgent:
-    def __init__(self, num_features = 6, num_actions = 4, regressor='XGBBoost'):
+    def __init__(self, num_features = 6, num_actions = 4, regressor='XGBoost'):
         self.num_features = num_features
         self.num_actions = num_actions
         self.regr_model = None
