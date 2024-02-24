@@ -312,6 +312,7 @@ class ProjectAgent:
         elif self.regressor == 'XGBoost':
             self.regr_model = xgb.XGBRegressor()
             self.regr_model.load_model('src/xgb_model.json')    
+            print('Model loaded')
         pass
 
 """Random Agent to compare with the trained agent.
@@ -345,17 +346,18 @@ if __name__ == "__main__":
     # print('Agent saved')
     DQN_ag.load()
     
-    randforest_ag = ProjectAgent(regressor='RandomForest')
-    randforest_ag.train(env = env, horizon = int(5*1e4), num_episodes=20)
-    randforest_ag.save()
-    # randforest_ag = RegressorAgent(regressor='RandomForest')
+    # randforest_ag = ProjectAgent(regressor='RandomForest')
+    # randforest_ag.train(env = env, horizon = int(5*1e4), num_episodes=20)
+    # randforest_ag.save()
+    # randforest_ag = ProjectAgent(regressor='RandomForest')
     # randforest_ag.load()
     
+    # xgb_ag = ProjectAgent(regressor='XGBoost')
+    # xgb_ag.train(env = env, horizon = int(5*1e4), num_episodes=20)
+    # xgb_ag.save()
     xgb_ag = ProjectAgent(regressor='XGBoost')
-    xgb_ag.train(env = env, horizon = int(5*1e4), num_episodes=20)
-    xgb_ag.save()
-    # xgb_ag = RegressorAgent(regressor='XGBoost')
-    # xgb_ag.load()
+    xgb_ag.load()
+   
     
     # lgbm_ag = RegressorAgent(regressor='LightGBM')
     # lgbm_ag.train(env = env, horizon = 100, num_episodes=200)
@@ -369,6 +371,8 @@ if __name__ == "__main__":
     env_part = TimeLimit(HIVPatient(domain_randomization=False), max_episode_steps=200)
     
     print("Evaluation on particular")
+    result_xgb_part = evaluate_agent(xgb_ag, env_part, nb_episode = 10)
+    print('Passed')
     result_DQN_part = evaluate_agent(DQN_ag, env_part, nb_episode = 10) 
     result_random_part = evaluate_agent(rand_ag, env_part, nb_episode = 10)
     result_randomforest_part = evaluate_agent(randforest_ag, env_part, nb_episode = 10)
