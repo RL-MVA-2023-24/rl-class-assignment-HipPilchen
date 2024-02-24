@@ -289,7 +289,7 @@ class ProjectAgent:
         else: 
             return self.select_action(state)
         
-    def save(self):
+    def save(self, path):
         if self.regressor == 'RandomForest':
             with open('src/random_forest_model.pkl', 'wb') as f:
                 cPickle.dump(self.regr_model, f)
@@ -301,7 +301,7 @@ class ProjectAgent:
             self.regr_model.save_model('src/xgb_model.json')
         pass
 
-    def load(self, path = ''):
+    def load(self):
         if self.regressor == 'RandomForest':
             with open('src/random_forest_model.pkl', 'rb') as f:
                 self.regr_model = cPickle.load(f)
