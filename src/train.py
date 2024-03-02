@@ -1,5 +1,5 @@
 from gymnasium.wrappers import TimeLimit
-from env_hivssh import HIVPatient
+from env_hiv import HIVPatient
 from matplotlib import pyplot as plt
 from evaluate import evaluate_agent
 from copy import deepcopy
@@ -365,7 +365,7 @@ class RegressorAgent:
             else:
                 state = next_state
         
-        Q_func = []
+        Q_func = {'past': None, 'current': None}
         SA = np.append(np.array(self.state_history), np.array(self.action_history).reshape((-1,1)),axis=1)
         for iter in range(self.config['num_episodes']):
             if iter % 50 == 0:
@@ -377,7 +377,7 @@ class RegressorAgent:
                 for next_action in range(self.num_actions):
                     A2 = next_action*np.ones((len(self.next_state_history), 1))
                     SA_next = np.append(np.array(self.next_state_history), A2,axis=1)
-                    Q2[:, next_action] = Q_func[-1].predict(SA_next)
+                    Q2[:, next_action] = Q_func['current'].predict(SA_next)
                 max_Q2 = np.max(Q2, axis=1)
                 value = np.array(self.reward_history).copy() + self.config['gamma']*max_Q2
             if self.regressor == 'RandomForest':
@@ -389,8 +389,9 @@ class RegressorAgent:
             elif self.regressor == 'ExtraTrees':
                 Q = ExtraTreesRegressor(n_estimators=self.config['n_estimators'])
             Q.fit(SA, value)
-            Q_func.append(Q)
-        self.regr_model = Q_func[-1]
+            Q_func['past']= Q_func['current']
+            Q_func['current'] = Q
+        self.regr_model = Q_func['current']
 
     def reset_state(self,env):
         observation, _ = env.reset()

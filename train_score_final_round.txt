@@ -1,0 +1,54 @@
+ ExtraTrees regressor 400 episodes: horizon=6000, n_estimators=100
+5.701049e+07
+3.842744e+07
+ ExtraTrees regressor 800 episodes: horizon=5000, n_estimators=100
+8.241080e+07
+9.097150e+07
+ ExtraTrees regressor 200 episodes: horizon=15000, , n_estimators=100
+7.827550e+08
+5.251268e+09
+ ExtraTrees regressor 400 episodes: horizon=6000, n_estimators=100
+4.523885e+07
+2.405479e+09
+ ExtraTrees regressor 800 episodes: horizon=5000, n_estimators=100
+3.448981e+09
+3.709283e+09
+ ExtraTrees regressor 200 episodes: horizon=15000, , n_estimators=100
+8.277427e+07
+4.762671e+08
+ ExtraTrees regressor: horizon=5000, n_estimators=100, n_episodes = 800
+2.521914e+07
+9.406877e+08
+ ExtraTrees regressor: horizon=5000, n_estimators=50, n_episodes = 800
+1.240917e+07
+4.587517e+07
+ ExtraTrees regressor: horizon=5000, n_estimators=50, n_episodes = 1000
+1.396040e+07
+1.203446e+08
+ ExtraTrees regressor: horizon=5000, n_estimators=50, n_episodes = 1200
+2.483122e+07
+3.272784e+09
+ ExtraTrees regressor: horizon=6000, n_estimators=50, n_episodes = 800
+6.424520e+07
+2.704563e+09
+ ExtraTrees regressor: horizon=6000, n_estimators=50, n_episodes = 1000
+2.846823e+07
+1.418192e+09
+ ExtraTrees regressor: horizon=6000, n_estimators=50, n_episodes = 1200
+2.315894e+07
+5.189558e+09
+ ExtraTrees regressor: horizon=8000, n_estimators=50, n_episodes = 800
+4.086219e+07
+5.145147e+09
+ ExtraTrees regressor: horizon=8000, n_estimators=50, n_episodes = 1000
+3.728015e+07
+4.398970e+09
+ ExtraTrees regressor trained on pop: horizon=5000, n_estimators=80, n_episodes = 800
+5.806985e+07
+1.043703e+09
+ ExtraTrees regressor trained on pop: horizon=5000, n_estimators=80, n_episodes = 1000
+5.398075e+07
+7.171110e+07
+ ExtraTrees regressor trained on pop: horizon=6000, n_estimators=80, n_episodes = 800
+4.267420e+07
+6.571414e+07
